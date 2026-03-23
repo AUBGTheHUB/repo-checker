@@ -144,6 +144,22 @@ def print_initial_setup():
     print_help()
 
 
+def print_final_summary(good_repos_count: int, violations: list[dict[str, str]], total_length: int) -> None:
+    # Final Competition Summary
+    print("\n" + "=" * EQUAL_SIGNS_COUNT)
+    print(f"🏁 SCAN COMPLETE")
+    print(f"Total Teams Checked: {good_repos_count + len(violations)}")
+    print(f"Total Violations:    {len(violations)}")
+
+    if violations:
+        print("\n🚨 DISQUALIFIED LIST:")
+        for v in violations:
+            print(f"  - TEAM: {v['team']} | REPO: {v['repo']} ({v['count']} late pushes)")
+    elif good_repos_count == total_length and total_length > 0:
+        print("\n🏆 All teams followed the deadline! No violations found.")
+    print("=" * EQUAL_SIGNS_COUNT)
+
+
 def check_repos(deadline_utc: str, participants: list, gh_token: str):
     headers = {"Authorization": f"token {gh_token}"}
     violations = []
@@ -175,20 +191,7 @@ def check_repos(deadline_utc: str, participants: list, gh_token: str):
                 print(f"{team[:25]:<25} | {repo[:35]:<35} | ⚠️ Error {response.status_code}")
         except Exception:
             print(f"{team[:25]:<25} | {repo[:35]:<35} | 📡 Connection Error")
-
-    # Final Competition Summary
-    print("\n" + "=" * EQUAL_SIGNS_COUNT)
-    print(f"🏁 SCAN COMPLETE")
-    print(f"Total Teams Checked: {good_repos_count + len(violations)}")
-    print(f"Total Violations:    {len(violations)}")
-
-    if violations:
-        print("\n🚨 DISQUALIFIED LIST:")
-        for v in violations:
-            print(f"  - TEAM: {v['team']} | REPO: {v['repo']} ({v['count']} late pushes)")
-    elif good_repos_count == len(participants) and len(participants) > 0:
-        print("\n🏆 All teams followed the deadline! No violations found.")
-    print("=" * EQUAL_SIGNS_COUNT)
+    print_final_summary(good_repos_count, violations, len(participants))
 
 
 def main_loop(gh_token: str, participants: list[dict[str, str]]) -> None:
