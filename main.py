@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import csv
-import os
+import re
 from datetime import datetime, timezone
 
 import requests
@@ -21,55 +21,70 @@ def print_help():
     print("=" * EQUAL_SIGNS_COUNT + "\n")
 
 
-def get_repos_from_csv() -> list[dict[str, str]]:
-    """Reads repository names from a CSV file."""
+def get_google_sheets_url() -> str:
+    """Prompts the user for a Google Sheets URL and validates its format."""
+    # Pattern to match the unique ID in a Google Sheets URL
+    gsheet_pattern = r"https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)"
+
     while True:
+        print("\n📋 GOOGLE SHEETS SETUP")
+        print("1. Ensure your Sheet is shared as 'Anyone with the link can view'.")
+        print("2. Paste the browser URL below.")
 
-        file_path = input("\nEnter the path to your CSV file (e.g., repos.csv): ").strip()
-        if not os.path.exists(file_path):
-            print(f"⚠️  Warning: '{file_path}' not found!")
-            continue
-        if os.path.isdir(file_path):
-            print(f"⚠️  Warning: Entered path is a directory: {file_path}. Try again!")
-            continue
-        if file_path == 'q':
+        url = input("Enter Google Sheet URL (or 'q' to quit): ").strip()
+
+        if url.lower() == 'q':
             exit(0)
-        break
 
-    participants = []
-    repo_keys = ['repository', 'repo']
-    team_keys = ['team', 'teamname', 'team name', 'group']
+        # Validate that it is actually a Google Sheets URL
+        match = re.search(gsheet_pattern, url)
+        if match:
+            # We extract the base part of the URL to ensure it's clean
+            sheet_id = match.group(1)
+            clean_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+            print(f"✅ URL recognized! Sheet ID: {sheet_id}")
+            return clean_url
+        else:
+            print("❌ Invalid URL. Please provide a standard Google Sheets link.")
+            print("Example: https://docs.google.com/spreadsheets/d/abc123xyz/edit")
 
-    with open(file_path, mode='r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
+
+def get_repos_from_google_sheets(sheet_url: str) -> list[dict]:
+    """Downloads a public Google Sheet as a CSV and parses it."""
+    try:
+        # Convert the standard sharing URL to a CSV export URL
+        # We use /export?format=csv to get the raw data
+        export_url = sheet_url.rstrip('/') + "/export?format=csv"
+
+        print("📡 Fetching team list from Google Sheets...")
+        response = requests.get(export_url)
+        response.raise_for_status()  # Check for download errors
+
+        # Use the CSV module to parse the downloaded text
+        lines = response.text.splitlines()
+        reader = csv.DictReader(lines)
+
+        participants = []
         for row in reader:
             row_values = list(row.values())
-            if not row_values:
-                continue
+            if not row_values: continue
 
-            # 1. Logic for REPO: Look for header, else use first column
-            repo_raw = next((row[k] for k in row if k and k.lower() in repo_keys), row_values[0])
-
-            # 2. Logic for TEAM: Look for header, else use second column if it exists
-            # If only one column exists, use "Team [RepoName]" as a fallback
-            team_name = next((row[k] for k in row if k and k.lower() in team_keys), None)
-
-            if not team_name:
-                if len(row_values) > 1:
-                    team_name = row_values[1]
-                else:
-                    # Fallback for 1-column CSV: use a portion of the repo name
-                    team_name = f"Team ({repo_raw.split('/')[-1]})"
+            # Reuse your existing logic for Repo and Team columns
+            repo_raw = next((row[k] for k in row if k and k.lower() in ['repository', 'repo']), row_values[0])
+            team_name = next((row[k] for k in row if k and k.lower() in ['team', 'teamname']),
+                             row_values[1] if len(row_values) > 1 else f"Team ({repo_raw})")
 
             if repo_raw:
-                repo_clean = repo_raw.replace("https://github.com/", "").strip("/")
                 participants.append({
-                    "repo": repo_clean,
+                    "repo": repo_raw.replace("https://github.com/", "").strip("/"),
                     "team": team_name.strip()
                 })
-
-    print(f"📂 Loaded {len(participants)} teams from {file_path}.")
-    return participants
+        participants_count = len(participants)
+        print(f"📂 Loaded {len(participants)} team{'s' if participants_count > 1 else ''} from Google Sheets.")
+        return participants
+    except Exception as e:
+        print(f"❌ Failed to load Google Sheet: {e}")
+        return []
 
 
 def validate_github_token(token: str) -> bool:
@@ -194,26 +209,54 @@ def check_repos(deadline_utc: str, participants: list, gh_token: str):
     print_final_summary(good_repos_count, violations, len(participants))
 
 
-def main_loop(gh_token: str, participants: list[dict[str, str]]) -> None:
+def main_loop(gh_token: str, participants: list[dict[str, str]], google_sheets_url: str) -> None:
+    # Calculate the inner width (total - 2 for the borders)
+    inner_w = EQUAL_SIGNS_COUNT - 2
+
     while True:
-        print("Date and Time Format: YYYY-MM-DD HH:MM")
-        print("Example: 2024-01-01 15:30")
-        local_input = input("\nEnter your local date and time, 'r' to change repos source or 'q' to quit:").strip()
+        # Dashboard UI
+        print(f"\n┌{'─' * inner_w}┐")
+        print(f"│{'CONTROL PANEL':^{inner_w}}│")
+        print(f"├{'─' * inner_w}┤")
+
+        # Helper to print a consistent row
+        def print_row(cmd, desc):
+            # 20 chars for cmd, the rest for desc, minus padding
+            # We use [:width] to truncate if it's too long
+            left_side = f" {cmd:<20} -> {desc}"
+            padding = " " * (inner_w - len(left_side))
+            print(f"│{left_side}{padding}│")
+
+        print_row("YYYY-MM-DD HH:MM", "Run deadline scan (Local Time)")
+        print_row("[r]", "Refresh data from Google Sheet")
+        print_row("[q]", "Exit application")
+
+        print(f"└{'─' * inner_w}┘")
+        local_input = input("👉 Enter command: ").strip()
 
         if local_input.lower() == 'q':
             print("👋 Goodbye!")
             break
         if local_input.lower() == 'r':
-            participants = get_repos_from_csv()
-            continue
-        deadline_utc = convert_time_to_utc(local_input)
-        if deadline_utc is None:
+            get_repos_from_google_sheets(google_sheets_url)
             continue
 
-        check_repos(deadline_utc, participants, gh_token)
+        if local_input.lower() == 'c':
+            google_sheets_url = get_google_sheets_url()
+            participants = get_repos_from_google_sheets(google_sheets_url)
+
+        # Check if the input looks like a date before trying to convert
+        if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", local_input):
+            deadline_utc = convert_time_to_utc(local_input)
+            if deadline_utc:
+                check_repos(deadline_utc, participants, gh_token)
+        else:
+            print("❌ Unknown command or invalid date format.")
 
 
 print_initial_setup()
 gh_token = get_github_token()
-repos = get_repos_from_csv()
-main_loop(gh_token, repos)
+
+google_sheets_url = get_google_sheets_url()
+repos = get_repos_from_google_sheets(google_sheets_url)
+main_loop(gh_token, repos, google_sheets_url)
