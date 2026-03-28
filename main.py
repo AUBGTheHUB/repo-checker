@@ -2,10 +2,10 @@
 import csv
 import re
 from datetime import datetime, timezone
-
+import readline
 import requests
 
-EQUAL_SIGNS_COUNT = 90
+EQUAL_SIGNS_COUNT = 75
 
 
 def print_help():
@@ -69,7 +69,6 @@ def get_repos_from_google_sheets(sheet_url: str) -> list[dict]:
             row_values = list(row.values())
             if not row_values: continue
 
-            # Reuse your existing logic for Repo and Team columns
             repo_raw = next((row[k] for k in row if k and k.lower() in ['repository', 'repo']), row_values[0])
             team_name = next((row[k] for k in row if k and k.lower() in ['team', 'teamname']),
                              row_values[1] if len(row_values) > 1 else f"Team ({repo_raw})")
@@ -161,10 +160,11 @@ def print_initial_setup():
 
 def print_final_summary(good_repos_count: int, violations: list[dict[str, str]], total_length: int) -> None:
     # Final Competition Summary
+    violations_length = len(violations)
     print("\n" + "=" * EQUAL_SIGNS_COUNT)
     print(f"🏁 SCAN COMPLETE")
-    print(f"Total Teams Checked: {good_repos_count + len(violations)}")
-    print(f"Total Violations:    {len(violations)}")
+    print(f"Total Teams Checked: {good_repos_count + violations_length}")
+    print(f"Total Violations:    {violations_length}")
 
     if violations:
         print("\n🚨 DISQUALIFIED LIST:")
@@ -254,9 +254,13 @@ def main_loop(gh_token: str, participants: list[dict[str, str]], google_sheets_u
             print("❌ Unknown command or invalid date format.")
 
 
-print_initial_setup()
-gh_token = get_github_token()
+try:
 
-google_sheets_url = get_google_sheets_url()
-repos = get_repos_from_google_sheets(google_sheets_url)
-main_loop(gh_token, repos, google_sheets_url)
+    print_initial_setup()
+    gh_token = get_github_token()
+    google_sheets_url = get_google_sheets_url()
+    repos = get_repos_from_google_sheets(google_sheets_url)
+    main_loop(gh_token, repos, google_sheets_url)
+
+except KeyboardInterrupt:
+    exit(0)
